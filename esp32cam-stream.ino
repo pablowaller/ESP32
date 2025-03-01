@@ -1,6 +1,7 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WebServer.h>
+#include <FirebaseESP32.h>
 
 // Configura tu red WiFi
 const char* ssid = "Luna 2.4";
@@ -8,6 +9,18 @@ const char* password = "Grecia2607";
 
 // Inicializa el servidor web
 WebServer server(80);
+
+#define FLASH_LED_PIN 4  // El LED del flash está en el GPIO 4
+
+#define API_KEY "AIzaSyDQJ-amic1aPwLp1B-XyctBgcMRd6ogYwM"
+#define DATABASE_URL "https://sense-bell-default-rtdb.firebaseio.com/"  
+
+// Variables para Firebase
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+void checkFlashStatus();
 
 // Configura los pines de la ESP32-CAM (Ai-Thinker)
 void configCamera() {
@@ -45,7 +58,7 @@ void configCamera() {
   }
 }
 
-// Flujo de video MJPEG
+// Flujo de video MJPEG con LED flash activado
 void handleStream() {
   WiFiClient client = server.client();
   camera_fb_t *fb = NULL;
@@ -55,11 +68,18 @@ void handleStream() {
   client.write(response.c_str(), response.length());
 
   while (client.connected()) {
+    // 🔦 ENCIENDE EL FLASH ANTES DE CAPTURAR
+    digitalWrite(FLASH_LED_PIN, HIGH);
+    delay(100);  // Aumentado a 100ms para mejor iluminación antes de capturar
+
     fb = esp_camera_fb_get();
     if (!fb) {
       Serial.println("Error al capturar imagen");
       continue;
     }
+
+    // 🔦 APAGA EL FLASH DESPUÉS DE CAPTURAR
+    digitalWrite(FLASH_LED_PIN, LOW);
 
     // Encabezado para cada frame
     String part = "--" + boundary + "\r\n" +
@@ -68,6 +88,7 @@ void handleStream() {
     client.write(part.c_str(), part.length());
     client.write(fb->buf, fb->len);
     client.write("\r\n");
+
     esp_camera_fb_return(fb);
   }
 }
@@ -75,6 +96,11 @@ void handleStream() {
 // Configuración inicial
 void setup() {
   Serial.begin(115200);
+  setCpuFrequencyMhz(240);  // Aumentado a 240 MHz para mejor rendimiento
+
+  // Configura el LED del flash como salida
+  pinMode(FLASH_LED_PIN, OUTPUT);
+  digitalWrite(FLASH_LED_PIN, LOW); // Asegurar que inicie apagado
 
   // Conexión WiFi
   WiFi.begin(ssid, password);
@@ -95,8 +121,48 @@ void setup() {
   // Inicia el servidor
   server.begin();
   Serial.println("Servidor iniciado");
+
+  // Configurar Firebase
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+  Firebase.begin(&config, NULL);
+  Firebase.reconnectWiFi(true);
+
+  // Escuchar cambios en "/flash"
+  Firebase.setStreamCallback(fbdo, streamCallback, streamTimeoutCallback);
+  if (!Firebase.beginStream(fbdo, "/flash")) {
+    Serial.println("Error al iniciar stream: " + fbdo.errorReason());
+  }
+}
+
+void streamCallback(StreamData data) {
+  if (data.dataType() == "boolean") {  // Solo procesar si es un booleano
+    bool flashState = data.boolData();
+    digitalWrite(FLASH_LED_PIN, flashState ? HIGH : LOW);
+    Serial.println(flashState ? "🔦 Flash ON" : "💡 Flash OFF");
+  }
+}
+
+// 🔹 CALLBACK: Manejo de errores de Firebase
+void streamTimeoutCallback(bool timeout) {
+  if (timeout) {
+    Serial.println("Firebase Timeout, reconectando...");
+    Firebase.beginStream(fbdo, "/flash");
+  }
 }
 
 void loop() {
   server.handleClient();
+  
+  // Reintentar conexión WiFi en caso de desconexión
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi perdido, reconectando...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+    delay(5000); // Espera antes de reintentar para evitar bucles rápidos
+  }
+
+  if (Firebase.ready()) {
+    Firebase.readStream(fbdo);
+  }
 }
