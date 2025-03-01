@@ -12,7 +12,7 @@ WebServer server(80);
 
 #define FLASH_LED_PIN 4  // El LED del flash está en el GPIO 4
 
-#define API_KEY "AIzaSyDQJ-amic1aPwLp1B-XyctBgcMRd6ogYwM"
+#define API_KEY "lZ5hOsyDNVMex6IibzuiLZEToIsFeOC70ths5los" 
 #define DATABASE_URL "https://sense-bell-default-rtdb.firebaseio.com/"  
 
 // Variables para Firebase
